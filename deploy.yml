@@ -3,11 +3,14 @@
   hosts: aws_servers
   become: yes
   tasks:
+    # Ensure Python pip is installed
     - name: Ensure Python pip is installed
-      yum:
+      apt:
         name: python3-pip
         state: present
+        update_cache: yes
 
+    # Install specific versions of requests and urllib3
     - name: Install specific versions of requests and urllib3
       pip:
         name:
@@ -17,28 +20,34 @@
         extra_args: --ignore-installed
         executable: /usr/bin/pip3
 
+    # Install Docker
     - name: Install Docker
-      yum:
-        name: docker
+      apt:
+        name: docker.io
         state: present
+        update_cache: yes
 
+    # Start Docker service
     - name: Start Docker service
       service:
         name: docker
         state: started
         enabled: yes
 
-    - name: Add ec2-user to docker group
+    # Add user to docker group
+    - name: Add user to docker group
       user:
-        name: ubuntu
+        name: ubuntu 
         groups: docker
         append: yes
 
+    # Pull Nginx Docker image
     - name: Pull Nginx Docker image
       community.docker.docker_image:
         name: nginx
         source: pull
 
+    # Run Nginx container
     - name: Run Nginx container
       community.docker.docker_container:
         name: nginx
