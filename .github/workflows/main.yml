@@ -1,127 +1,64 @@
-name: CI/CD Pipeline for Terraform, Ansible, and Docker
+provider "aws" {
+  region = "eu-west-1"  # Change to your desired AWS region
+}
 
-on:
-  push:
-    branches:
-      - main  # Trigger the workflow on push to the 'main' branch.
-  pull_request:
-    branches:
-      - main  # Trigger the workflow on pull requests to the 'main' branch.
+# Define a Security Group with a unique name or check if it exists
+resource "aws_security_group" "vm_sg" {
+  # Dynamically generate a unique name by using a timestamp to avoid duplicates
+  name        = "vm_security_group_${timestamp()}"
+  description = "Allow SSH and HTTP access"
 
-jobs:
-  # Terraform Job
-  terraform:
-    runs-on: ubuntu-latest
-    environment: production
+  # Allow SSH (port 22)
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+  # Allow HTTP (port 80)
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-      - name: Set up AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+  # Egress (Allow all outbound traffic)
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
 
-      - name: Install Terraform
-        run: |
-          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-          sudo apt-add-repository "deb https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-          sudo apt-get update
-          sudo apt-get install terraform
+# Data source to fetch an existing key pair from your AWS account
+data "aws_key_pair" "existing_key" {
+  key_name = "my-key-pair"  # Replace with your existing key pair name
+}
 
-      - name: Initialize Terraform
-        run: terraform init
+# EC2 Instance using the key pair and security group
+resource "aws_instance" "vm" {
+  ami           = "ami-0d64bb532e0502c46"  # Replace with your preferred AMI ID
+  instance_type = "t2.micro"
+  key_name      = data.aws_key_pair.existing_key.key_name   # Reference the existing key pair
 
-      - name: Apply Terraform
-        run: terraform apply -auto-approve
+  # Associate the EC2 instance with the security group
+  vpc_security_group_ids = [aws_security_group.vm_sg.id]
 
-      - name: Run bash script to capture EC2 IP and save it to file
-        run: |
-          chmod +x scripts/get_instance_ip.sh
-          ./scripts/get_instance_ip.sh
+  tags = {
+    Name = "TerraformVM"
+  }
+}
 
-      - name: Upload EC2 IP as artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: instance-ip
-          path: instance_ip.txt
+# Output the public IP of the EC2 instance
+output "vm_ip" {
+  value = aws_instance.vm.public_ip
+}
 
-  # Ansible Job
-  ansible:
-    runs-on: ubuntu-latest
-    needs: terraform  # Ensure this job runs only after terraform job completes
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Install Ansible
-        run: |
-          sudo apt update
-          sudo apt install -y software-properties-common
-          sudo add-apt-repository --yes --update ppa:ansible/ansible
-          sudo apt install -y ansible
-
-      - name: Install Docker (for running the playbook)
-        run: |
-          sudo apt update
-          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-
-      - name: Download EC2 IP artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: instance-ip
-
-      - name: Read EC2 IP from file and create Ansible inventory
-        run: |
-          INSTANCE_IP=$(cat instance_ip.txt)
-          echo "Using EC2 IP: $INSTANCE_IP"
-
-          if [ -z "$INSTANCE_IP" ]; then
-            echo "Error: EC2 instance IP is not available"
-            exit 1
-          fi
-
-          # Create the Ansible inventory file dynamically
-          echo "[aws_servers]" > inventory.ini
-          echo "$INSTANCE_IP ansible_user=ec2-user ansible_ssh_private_key_file=my-key-pair.pem ansible_ssh_extra_args='-o StrictHostKeyChecking=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=publickey -o PasswordAuthentication=no'" >> inventory.ini
-          
-          echo "Created Ansible inventory file"
-
-      - name: Debug Inventory File (optional)
-        run: cat inventory.ini
-
-      - name: Run Ansible playbook
-        run: ansible-playbook -i inventory.ini deploy.yml
-
-  # Docker Job
-  docker:
-    runs-on: ubuntu-latest
-    needs: ansible  # Ensure this job runs only after ansible job completes
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up Docker
-        run: |
-          sudo apt update
-          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-
-      - name: Build Docker image
-        run: |
-          docker build -t nginx-image -f Dockerfile .
-
-      - name: Run Docker container
-        run: |
-          docker run -d -p 80:80 nginx-image
+# Save the public IP to a .txt file on apply
+resource "local_file" "output_ip" {
+  content  = aws_instance.vm.public_ip
+  filename = "${path.module}/vm_ip.txt"
+}
