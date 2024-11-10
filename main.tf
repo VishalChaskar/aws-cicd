@@ -41,7 +41,7 @@ data "aws_key_pair" "existing_key" {
 
 # EC2 Instance using the key pair and security group
 resource "aws_instance" "vm" {
-  ami           = "ami-03ca36368dbc9cfa1"  # Replace with your preferred AMI ID
+  ami           = "ami-0917d3c16c89e5dc3"  # Replace with your preferred AMI ID
   instance_type = "t2.micro"
   key_name      = data.aws_key_pair.existing_key.key_name   # Reference the existing key pair
 
