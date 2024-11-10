@@ -1,9 +1,8 @@
 provider "aws" {
-  region = "eu-west-1"
+  region = "eu-west-1"  # Change to your desired AWS region
 }
 
 # Define a Security Group with a unique name or check if it exists
-
 resource "aws_security_group" "vm_sg" {
   # Dynamically generate a unique name by using a timestamp to avoid duplicates
   name        = "vm_security_group_${timestamp()}"
