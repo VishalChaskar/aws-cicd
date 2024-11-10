@@ -1,3 +1,4 @@
+---
 - name: Set up Docker and Nginx container
   hosts: aws_servers
   become: yes
@@ -6,6 +7,13 @@
     - name: Ensure Python pip is installed
       apt:
         name: python3-pip
+        state: present
+        update_cache: yes
+
+    # Install python3-venv (required to create Python virtual environments)
+    - name: Install python3-venv
+      apt:
+        name: python3-venv
         state: present
         update_cache: yes
 
