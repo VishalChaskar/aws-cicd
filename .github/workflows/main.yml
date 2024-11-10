@@ -1,64 +1,93 @@
-provider "aws" {
-  region = "eu-west-1"  # Change to your desired AWS region
-}
+name: CI/CD Pipeline for Terraform, Ansible, and Docker
 
-# Define a Security Group with a unique name or check if it exists
-resource "aws_security_group" "vm_sg" {
-  # Dynamically generate a unique name by using a timestamp to avoid duplicates
-  name        = "vm_security_group_${timestamp()}"
-  description = "Allow SSH and HTTP access"
+on:
+  push:
+    branches:
+      - main  # Trigger the workflow on push to the 'main' branch.
+  pull_request:
+    branches:
+      - main  # Trigger the workflow on pull requests to the 'main' branch.
 
-  # Allow SSH (port 22)
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+jobs:
+  # Terraform Job
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
 
-  # Allow HTTP (port 80)
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-  # Egress (Allow all outbound traffic)
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-# Data source to fetch an existing key pair from your AWS account
-data "aws_key_pair" "existing_key" {
-  key_name = "my-key-pair"  # Replace with your existing key pair name
-}
+      - name: Install Terraform
+        run: |
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+          sudo apt-get update
+          sudo apt-get install terraform
 
-# EC2 Instance using the key pair and security group
-resource "aws_instance" "vm" {
-  ami           = "ami-0d64bb532e0502c46"  # Replace with your preferred AMI ID
-  instance_type = "t2.micro"
-  key_name      = data.aws_key_pair.existing_key.key_name   # Reference the existing key pair
+      - name: Initialize Terraform
+        run: terraform init
 
-  # Associate the EC2 instance with the security group
-  vpc_security_group_ids = [aws_security_group.vm_sg.id]
+      - name: Apply Terraform
+        run: terraform apply -auto-approve
 
-  tags = {
-    Name = "TerraformVM"
-  }
-}
+      - name: Output EC2 Instance IP to File
+        run: |
+          terraform output -raw vm_ip > instance_ip.txt  # Capture IP into a file
 
-# Output the public IP of the EC2 instance
-output "vm_ip" {
-  value = aws_instance.vm.public_ip
-}
+      - name: Upload IP file as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: instance-ip-file
+          path: instance_ip.txt
 
-# Save the public IP to a .txt file on apply
-resource "local_file" "output_ip" {
-  content  = aws_instance.vm.public_ip
-  filename = "${path.module}/vm_ip.txt"
-}
+  # Ansible Job
+  ansible:
+    runs-on: ubuntu-latest
+    needs: terraform  # Ensures the Terraform job runs first
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Download the instance IP from Terraform output
+        uses: actions/download-artifact@v3
+        with:
+          name: instance-ip-file
+
+      - name: Read EC2 Instance IP
+        run: |
+          INSTANCE_IP=$(cat instance_ip.txt)
+          echo "EC2 Instance IP: $INSTANCE_IP"  # Debugging output to check the IP
+
+      - name: Install Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y software-properties-common
+          sudo add-apt-repository --yes --update ppa:ansible/ansible
+          sudo apt install -y ansible
+
+      - name: Set up Ansible inventory file
+        run: |
+          echo "[aws_servers]" > inventory.ini
+          echo "$INSTANCE_IP ansible_user=ec2-user ansible_ssh_private_key_file=my-key-pair.pem ansible_ssh_extra_args='-o StrictHostKeyChecking=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=publickey -o PasswordAuthentication=no'" >> inventory.ini
+
+      - name: Debug Inventory File (optional)
+        run: cat inventory.ini
+
+      - name: Run Ansible playbook
+        run: ansible-playbook -i inventory.ini deploy.yml
