@@ -40,7 +40,10 @@ jobs:
 
       - name: Output EC2 Instance IP
         id: terraform
-        run: echo "::set-output name=instance_ip::$(terraform output -raw instance_ip)"
+        run: |
+          # Store the instance IP as an output environment variable
+          echo "instance_ip=$(terraform output -raw instance_ip)" >> $GITHUB_ENV
+          echo "EC2 Instance IP: ${{ env.instance_ip }}"  # Debugging output to check the IP
 
   # Ansible Job
   ansible:
@@ -75,7 +78,7 @@ jobs:
       - name: Set up Ansible inventory file
         run: |
           echo "[aws_servers]" > inventory.ini
-          echo "${{ needs.terraform.outputs.instance_ip }} ansible_user=ec2-user ansible_ssh_private_key_file=my-key-pair.pem ansible_ssh_extra_args='-o StrictHostKeyChecking=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=publickey -o PasswordAuthentication=no'" >> inventory.ini
+          echo "${{ env.instance_ip }} ansible_user=ec2-user ansible_ssh_private_key_file=my-key-pair.pem ansible_ssh_extra_args='-o StrictHostKeyChecking=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=publickey -o PasswordAuthentication=no'" >> inventory.ini
 
       - name: Debug Inventory File (optional)
         run: cat inventory.ini
