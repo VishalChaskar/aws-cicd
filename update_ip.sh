@@ -14,6 +14,6 @@ fi
 
 # Update the inventory.ini file with the new IP
 echo "[aws_servers]" > inventory.ini
-echo "$INSTANCE_IP ansible_user=ec2-user ansible_ssh_private_key_file=my-key-pair.pem" >> inventory.ini
+echo "$INSTANCE_IP ansible_user=ubuntu ansible_ssh_private_key_file=my-key-pair.pem" >> inventory.ini
 
 echo "Inventory file updated with IP: $INSTANCE_IP"
