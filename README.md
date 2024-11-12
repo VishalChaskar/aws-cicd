@@ -44,7 +44,7 @@ The deployment includes the following components:
    - Install [Terraform](https://www.terraform.io/downloads.html) and [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html).
    - Clone this repository: 
      ```bash
-     git clone https://github.com/ParthDBS/aws-terraform-docke.git
+     git clone https://github.com/VishalChaskar/aws-cicd.git
      ```
    - Create an SSH key pair to access the EC2 instance (if not using an existing one).
   
